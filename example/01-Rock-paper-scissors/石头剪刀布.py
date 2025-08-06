@@ -1,10 +1,10 @@
 # -*-coding:utf-8 -*-
 
 """
-# File:         石头剪刀布.py
+# File:         01-Rock-paper-scissors.py
 # Time:         2025/8/5 10:07
 # Author:       Martin
-# Description:  
+# Description:  猜拳游戏设计、代码优化问题
 """
 import random
 
