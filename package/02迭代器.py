@@ -63,6 +63,28 @@
 # 第一次执行
 # 1
 
+# 类的迭代器
+class CountToN:
+    def __init__(self,n):
+        self.n = n
+        self.current = 1
+
+    def __iter__(self):
+        return self
+    def __next__(self):
+        if self.current <= self.n:
+            result = self.current
+            self.current += 1
+            return result
+        else:
+            # 抛出StopIteration异常、被for捕获停止
+            raise StopIteration
+
+counter = CountToN(5)
+
+for number in counter:
+    print(number)
+
 # yield表达式
 def func(x):
     print(f"{x}开始执行")
@@ -70,13 +92,13 @@ def func(x):
         y = yield None
         print('\n', x, y, '\n')
 
-g = func(1)
+# g = func(1)
 # res = next(g)
 # print(res)
 # next(g)
 
-g.send(None) # next(g)
+# g.send(None) # next(g)
 # next(g)
-g.send(10)
+# g.send(10)
 
-g.send(20)
+# g.send(20)
