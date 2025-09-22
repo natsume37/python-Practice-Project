@@ -100,5 +100,4 @@ def func(x):
 # g.send(None) # next(g)
 # next(g)
 # g.send(10)
-
 # g.send(20)
