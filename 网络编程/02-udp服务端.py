@@ -3,7 +3,13 @@
 @File    : 02-udp服务端.py
 @Author  : Martin
 @Time    : 2025/9/22 22:51
-@Desc    : 
+you@Desc    :
+UDP 不会出现粘包问题
+一个send对应一个recv
+收不干净直接丢弃（mac\inux)
+报错（Windows）
+
+UDP最大传输 1472byte(稳定：512字节）
 """
 import socket
 
