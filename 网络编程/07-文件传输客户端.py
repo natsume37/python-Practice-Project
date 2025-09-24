@@ -10,6 +10,7 @@ import hashlib
 import json
 import socket
 import os
+import time
 
 
 def read_large_file(file_path, chunk_size=1024):
@@ -27,96 +28,76 @@ def file_to_md5(file_path):
     """
     m = hashlib.md5()
     with open(file_path, 'rb') as f:
-        f.seek(0, 2)  # 将指针移到最后
-        size = f.tell()  # 获取当前指针的位置
-        one_tenth = size // 10
-        for i in range(10):
-            f.seek(i * one_tenth, 0)
-            res = f.read(100)
-            m.update(res)
-        return m.hexdigest()
+        for chunk in iter(lambda: f.read(4096), b''):
+            m.update(chunk)
+    return m.hexdigest()
 
 
-def send_data(sk, header_json, data=None):
+def send_data(sk, header, data=None):
     """
     发送数据的协议实现
-    协议格式: [4字节头部长度] + [头部JSON] + [数据内容]
-
-    :param sk: socket对象
-    :param header_json: 头部信息字典
-    :param data: 要发送的数据，可以是str或bytes
-    :return: 是否发送成功
+    协议格式: [4字节头部长度（二进制）] + [头部JSON] + [数据内容]
     """
     try:
-        # 序列化头部
-        header_str = json.dumps(header_json)
-        header_bytes = header_str.encode('utf-8')
-
-        # 发送头部长度（固定4字节，右补0）
-        header_length = str(len(header_bytes)).zfill(4).encode('utf-8')
+        header_json = json.dumps(header)
+        header_bytes = header_json.encode('utf-8')
+        header_length = bytes(str(len(header_bytes)), 'utf-8').zfill(4)
         sk.send(header_length)
-
-        # 发送头部数据
         sk.send(header_bytes)
-
-        # 发送数据内容（如果有）
-        if data is not None:
+        print(f"发送头部: {header_json}")
+        if data:
+            print('data', data)
             if isinstance(data, str):
                 data = data.encode('utf-8')
             sk.send(data)
-
+            print(f"发送数据: {len(data)} 字节")
         return True
-
     except Exception as e:
         print(f"发送数据失败: {e}")
         return False
 
 
-def recv_data(sk, timeout=10):
+def recv_data(sk, timeout=60):
     """
     接收数据的协议实现
-    协议格式: [4字节头部长度] + [头部JSON] + [数据内容]
-
-    :param sk: socket对象
-    :param timeout: 超时时间（秒）
-    :return: (header_dict, data_bytes) 或 (None, None) 如果失败
     """
     sk.settimeout(timeout)
-
     try:
-        # 1. 接收头部长度（4字节）
+        print("开始接收头部长度")
         header_length_bytes = sk.recv(4)
-        if not header_length_bytes:
+        if not header_length_bytes or len(header_length_bytes) < 4:
+            print("接收头部长度失败或不足 4 字节")
             return None, None
-
-        header_length = int(header_length_bytes.decode('utf-8').strip())
-
-        # 2. 接收头部JSON数据
+        header_length = int(header_length_bytes.decode('utf-8'))
+        print(f"头部长度: {header_length}")
         header_bytes = b''
         while len(header_bytes) < header_length:
             chunk = sk.recv(header_length - len(header_bytes))
             if not chunk:
+                print("接收头部数据中断")
                 return None, None
             header_bytes += chunk
-
-        header_dict = json.loads(header_bytes.decode('utf-8'))
-
-        # 3. 接收数据内容
+        try:
+            header_dict = json.loads(header_bytes.decode('utf-8'))
+            print(f"接收到头部: {header_dict}")
+        except json.JSONDecodeError as e:
+            print(f"JSON 解析失败: {e}")
+            return None, None
         data_size = header_dict.get('size', 0)
-        data_type = header_dict.get('type', 'msg')
-
+        print(f"预期数据大小: {data_size}")
         data_bytes = b''
         if data_size > 0:
-            # 接收指定大小的数据
-            while len(data_bytes) < data_size:
-                chunk_size = min(1024, data_size - len(data_bytes))
+            received = 0
+            while received < data_size:
+                chunk_size = min(1024, data_size - received)
                 chunk = sk.recv(chunk_size)
                 if not chunk:
+                    print(f"数据接收中断，已接收: {received}/{data_size} 字节")
                     break
                 data_bytes += chunk
-
+                received += len(chunk)
+                print(f"接收数据块: {len(chunk)} 字节，总计: {received}/{data_size}")
         return header_dict, data_bytes
-
     except socket.timeout:
         print("接收数据超时")
         return None, None
@@ -125,24 +106,30 @@ def recv_data(sk, timeout=10):
         return None, None
 
 
-def send_msg(sk, msg):
-    """
-    发送消息到服务器
-    """
-    header_json = {
-        "type": "msg",
-        "size": len(msg.encode('utf-8')),
-        "action": "message"
-    }
+def send_header_json(sk, header):
+    header_bytes = bytes(json.dumps(header), encoding='utf-8')
+    header_bytes_l = len(header_bytes)
+    header_l_bytes = bytes(str(header_bytes_l), "utf-8").zfill(4)
+    # 发送数据头长度
+    sk.send(header_l_bytes)
+    # 发送header_json
+    sk.send(bytes(json.dumps(header), encoding='utf-8'))
+    return True
 
-    if send_data(sk, header_json, msg):
-        # 等待服务器响应
-        response_header, response_data = recv_data(sk)
-        if response_header and response_data:
-            response_text = response_data.decode('utf-8')
-            print(f"服务器响应: {response_text}")
-            return True
-    return False
+
+def send_msg(sk, msg):
+    header = {
+        "mode": 'msg',
+        "user": "Martin",
+        "msg": msg.strip()
+    }
+    if not send_header_json(sk, header):
+        print("发送失败")
+    print("请求发送成功")
+    # 处理收请求
+    header_json = recv_header_json(sk)
+    if header_json.get("code", 0) == 200:
+        print(header_json.get('msg'))
 
 
 def send_file(sk, file_path):
@@ -152,11 +139,8 @@ def send_file(sk, file_path):
     if not os.path.exists(file_path):
         print(f"文件不存在: {file_path}")
         return False
-
     file_name = os.path.basename(file_path)
     file_size = os.path.getsize(file_path)
-
-    # 准备文件头信息
     file_header = {
         "type": "file",
         "file_name": os.path.splitext(file_name)[0],
@@ -165,39 +149,33 @@ def send_file(sk, file_path):
         "size": file_size,
         "action": "upload"
     }
-
-    print(f"准备上传文件: {file_name}, 大小: {file_size} bytes")
-
-    # 先发送文件头信息
+    print(f"准备上传文件: {file_name}, 大小: {file_size} 字节")
     if not send_data(sk, file_header):
         print("发送文件头失败")
         return False
-
-    # 等待服务器确认
     response_header, response_data = recv_data(sk)
+    print(f"file:response_header {response_header}")
     if not response_header or response_header.get('status') != 'ready':
         print("服务器未准备好接收文件")
         return False
-
-    # 发送文件内容
     try:
         total_sent = 0
         for chunk in read_large_file(file_path):
-            sk.send(chunk)
-            total_sent += len(chunk)
+            sent = sk.send(chunk)
+            total_sent += sent
             progress = total_sent / file_size * 100
-            print(f"\r上传进度: {total_sent}/{file_size} bytes ({progress:.1f}%)", end='')
-
+            print(f"\r上传进度: {total_sent}/{file_size} 字节 ({progress:.1f}%)", end='')
         print("\n文件内容发送完成")
-
-        # 等待最终确认
+        if total_sent != file_size:
+            print(f"发送数据不完整: 期望 {file_size}, 实际 {total_sent}")
+            return False
+        time.sleep(0.1)  # 短暂等待服务端处理
         final_header, final_data = recv_data(sk)
         if final_data:
             final_text = final_data.decode('utf-8')
             print(f"服务器确认: {final_text}")
-
-        return True
-
+            return final_header.get('status') == 'success'
+        return False
     except Exception as e:
         print(f"文件发送失败: {e}")
         return False
@@ -212,37 +190,29 @@ def get_file(sk, file_name):
         "size": len(file_name.encode('utf-8')),
         "action": "download"
     }
-
     if send_data(sk, header_json, file_name):
-        # 接收文件头信息
         file_header, file_data = recv_data(sk)
         if file_header and file_header.get('type') == 'file':
             file_size = file_header.get('size', 0)
             file_name = file_header.get('file_name', 'download') + file_header.get('file_format', '')
-
-            print(f"开始下载文件: {file_name}, 大小: {file_size} bytes")
-
-            # 如果文件头中已经包含部分数据，先保存
+            print(f"开始下载文件: {file_name}, 大小: {file_size} 字节")
             received_size = len(file_data)
             with open(file_name, 'wb') as f:
                 if file_data:
                     f.write(file_data)
-
-                # 继续接收剩余数据
                 while received_size < file_size:
                     chunk_size = min(1024, file_size - received_size)
                     chunk = sk.recv(chunk_size)
                     if not chunk:
+                        print(f"文件数据接收中断，已接收: {received_size}/{file_size} 字节")
                         break
                     f.write(chunk)
                     received_size += len(chunk)
                     progress = received_size / file_size * 100
-                    print(f"\r下载进度: {received_size}/{file_size} bytes ({progress:.1f}%)", end='')
-
+                    print(f"\r下载进度: {received_size}/{file_size} 字节 ({progress:.1f}%)", end='')
             print(f"\n文件下载完成: {file_name}")
             return True
         else:
-            # 接收错误消息
             if file_data:
                 error_text = file_data.decode('utf-8')
                 print(f"下载失败: {error_text}")
@@ -255,11 +225,10 @@ def show_files(sk):
     """
     header_json = {
         "type": "msg",
-        "size": 0,  # 没有数据体
+        "size": 0,
         "action": "list_files"
     }
-
-    if send_data(sk, header_json):  # 只发送头部，没有数据体
+    if send_data(sk, header_json):
         response_header, response_data = recv_data(sk)
         if response_data:
             file_list = response_data.decode('utf-8')
@@ -267,6 +236,24 @@ def show_files(sk):
             print(file_list)
             return True
     return False
+
+
+def recv_header_json(sk):
+    """
+    header_json解析函数
+    :param conn:
+    :return: header_json|None
+    """
+    header_h_bytes = sk.recv(4)
+    header_h = int(header_h_bytes.decode('utf-8'))
+    # 收取header_json
+    header_json_bytes = sk.recv(header_h)
+    if not header_json_bytes:
+        sk.close()
+        print("文件头问题、断开连接")
+        return None
+    header_json = json.loads(header_json_bytes.decode('utf-8'))
+    return header_json
 
 
 def help_menu():
@@ -287,58 +274,42 @@ def main():
     主函数
     """
     try:
-        # 创建TCP socket
         sk = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sk.settimeout(10)  # 设置超时时间
-
-        # 连接服务器
+        sk.settimeout(60)
         sk.connect(('127.0.0.1', 8081))
         print("连接服务器成功！")
-
         while True:
             help_menu()
             user_input = input("请输入命令>>> ").strip()
-
             if not user_input:
                 continue
-
-            # 退出命令
             if user_input.lower() == 'exit' or user_input == '5':
                 print("退出程序")
                 break
-
-            # 分割命令和参数
             parts = user_input.split(' ', 1)
             cmd = parts[0].lower()
-
             try:
                 if cmd == '1' or cmd == 'show':
                     show_files(sk)
-
                 elif cmd == '2' or cmd == 'get':
                     if len(parts) > 1:
                         get_file(sk, parts[1])
                     else:
                         print("请指定要下载的文件名，例如: get filename.txt")
-
                 elif cmd == '3' or cmd == 'pull':
                     if len(parts) > 1:
                         send_file(sk, parts[1])
                     else:
                         print("请指定要上传的文件路径，例如: pull /path/to/file.txt")
-
                 elif cmd == '4' or cmd == 'send':
                     if len(parts) > 1:
                         send_msg(sk, parts[1])
                     else:
                         print("请指定要发送的消息，例如: send Hello Server")
-
                 else:
                     print("无效命令，请输入1-5或show/get/pull/send/exit")
-
             except Exception as e:
                 print(f"执行命令时出错: {e}")
-
     except ConnectionRefusedError:
         print("无法连接到服务器，请确保服务器正在运行")
     except socket.timeout:
@@ -346,7 +317,6 @@ def main():
     except Exception as e:
         print(f"程序出错: {e}")
     finally:
-        # 关闭连接
         try:
             sk.close()
         except:
