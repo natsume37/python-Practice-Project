@@ -142,43 +142,33 @@ def send_file(sk, file_path):
     file_name = os.path.basename(file_path)
     file_size = os.path.getsize(file_path)
     file_header = {
-        "type": "file",
+        "mode": 'file',
+        "user": "Martin",
         "file_name": os.path.splitext(file_name)[0],
-        "file_format": os.path.splitext(file_name)[1],
-        "MD5": file_to_md5(file_path),
-        "size": file_size,
-        "action": "upload"
+        "file_type": os.path.splitext(file_name)[1],
+        "action": "pull_file",
+        "md5": file_to_md5(file_path),
+        "file_size": file_size,
     }
     print(f"准备上传文件: {file_name}, 大小: {file_size} 字节")
-    if not send_data(sk, file_header):
-        print("发送文件头失败")
+    res = send_header_json(sk, file_header)
+    if not res:
+        print("文件发送失败")
         return False
-    response_header, response_data = recv_data(sk)
-    print(f"file:response_header {response_header}")
-    if not response_header or response_header.get('status') != 'ready':
-        print("服务器未准备好接收文件")
+    # 开始发送文件
+    # 大文件判断
+
+    for chunk in read_large_file(file_path):
+        sk.send(chunk)
+    print("文件已发送")
+    # 处理服务器的反馈信息
+    header_200 = recv_header_json(sk)
+    if header_200.get("code", 0) != 200:
+        msg = header_200.get("msg")
+        print(msg)
         return False
-    try:
-        total_sent = 0
-        for chunk in read_large_file(file_path):
-            sent = sk.send(chunk)
-            total_sent += sent
-            progress = total_sent / file_size * 100
-            print(f"\r上传进度: {total_sent}/{file_size} 字节 ({progress:.1f}%)", end='')
-        print("\n文件内容发送完成")
-        if total_sent != file_size:
-            print(f"发送数据不完整: 期望 {file_size}, 实际 {total_sent}")
-            return False
-        time.sleep(0.1)  # 短暂等待服务端处理
-        final_header, final_data = recv_data(sk)
-        if final_data:
-            final_text = final_data.decode('utf-8')
-            print(f"服务器确认: {final_text}")
-            return final_header.get('status') == 'success'
-        return False
-    except Exception as e:
-        print(f"文件发送失败: {e}")
-        return False
+    print("传送成功")
+    return True
 
 
 def get_file(sk, file_name):
@@ -240,9 +230,9 @@ def show_files(sk):
 
 def recv_header_json(sk):
     """
-    header_json解析函数
-    :param conn:
-    :return: header_json|None
+
+    :param sk:
+    :return:
     """
     header_h_bytes = sk.recv(4)
     header_h = int(header_h_bytes.decode('utf-8'))

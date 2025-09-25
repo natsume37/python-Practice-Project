@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import hashlib
 import json
 import socket
 import os
@@ -118,9 +119,64 @@ def send_data(conn, header_json, data=None):
         return False
 
 
+def send_header_json(conn, header):
+    header_bytes = bytes(json.dumps(header), encoding='utf-8')
+    header_bytes_l = len(header_bytes)
+    header_l_bytes = bytes(str(header_bytes_l), "utf-8").zfill(4)
+    # 发送数据头长度
+    conn.send(header_l_bytes)
+    # 发送header_json
+    conn.send(bytes(json.dumps(header), encoding='utf-8'))
+    return True
+
+
+def receive_file_chunks(conn, file_size, chunk_size=1024):
+    """
+    服务器端接收文件数据的迭代器
+
+    参数:
+        conn: 连接对象，用于接收数据
+        file_size: 预期的文件总大小
+        chunk_size: 每次接收的数据块大小，默认1024字节
+
+    返回:
+        生成器，每次产生接收到的数据块
+    """
+    remaining = file_size
+    while remaining > 0:
+        # 计算本次应该接收的实际大小（不超过剩余大小和块大小）
+        receive_size = min(chunk_size, remaining)
+        # 接收数据
+        chunk = conn.recv(receive_size)
+
+        if not chunk:
+            # 如果没有接收到数据，但还有剩余 bytes 未接收，说明连接可能中断
+            raise ConnectionAbortedError("连接已中断，文件传输不完整")
+
+        yield chunk
+        remaining -= len(chunk)
+
+    # 如果所有数据都已接收完毕
+    if remaining == 0:
+        return True
+    else:
+        raise RuntimeError(f"文件传输不完整，预期接收{file_size}字节，实际接收{file_size - remaining}字节")
+
+
+def file_to_md5(file_path):
+    """
+    计算文件的MD5值
+    """
+    m = hashlib.md5()
+    with open(file_path, 'rb') as f:
+        for chunk in iter(lambda: f.read(4096), b''):
+            m.update(chunk)
+    return m.hexdigest()
+
+
 def recv_file(conn, header_json):
     """
-    客户端获取文件命令
+    处理file-pull_file请求
     :param conn:
     :param header_json:
         {
@@ -134,7 +190,37 @@ def recv_file(conn, header_json):
         }
     :return: bool
     """
-    pass
+    file_name = header_json['file_name'] + header_json['file_type']
+    file_path = os.path.join("uploads", file_name)
+    with open(file_path, 'wb') as f:
+        for i in receive_file_chunks(conn, file_size=header_json['file_size']):
+            f.write(i)
+    # 文件看清校验
+    file_md5 = header_json.get('md5')
+    if file_md5 != file_to_md5(file_path):
+        # 返回处理结果
+        header_200 = {
+            "code": 400,
+            "file_name": header_json['file_name'],
+            "file_type": header_json['file_type'],
+            "action": "pull_file",
+            "msg": "文件可能被篡改、上传失败"
+        }
+        send_header_json(conn, header_200)
+        return False
+    # 返回处理结果
+    header_200 = {
+        "code": 200,
+        "file_name": header_json['file_name'],
+        "file_type": header_json['file_type'],
+        "action": "pull_file",
+        "msg": "上传成功"
+    }
+    res = send_header_json(conn, header_200)
+    if not res:
+        return False
+    return True
+
 
 def reply_msg(conn, header_json):
     data = header_json.get('msg', None)
@@ -167,6 +253,9 @@ def handle_client_request(conn, addr):
             # 正常消息回复大写
             if header_json['mode'] == 'msg':
                 reply_msg(conn, header_json)
+            elif header_json['mode'] == 'file':
+                if header_json['action'] == 'pull_file':
+                    recv_file(conn, header_json)
             else:
                 continue
     except socket.timeout:
