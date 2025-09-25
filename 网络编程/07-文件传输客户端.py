@@ -33,79 +33,6 @@ def file_to_md5(file_path):
     return m.hexdigest()
 
 
-def send_data(sk, header, data=None):
-    """
-    发送数据的协议实现
-    协议格式: [4字节头部长度（二进制）] + [头部JSON] + [数据内容]
-    """
-    try:
-        header_json = json.dumps(header)
-        header_bytes = header_json.encode('utf-8')
-        header_length = bytes(str(len(header_bytes)), 'utf-8').zfill(4)
-        sk.send(header_length)
-        sk.send(header_bytes)
-        print(f"发送头部: {header_json}")
-        if data:
-            print('data', data)
-            if isinstance(data, str):
-                data = data.encode('utf-8')
-            sk.send(data)
-            print(f"发送数据: {len(data)} 字节")
-        return True
-    except Exception as e:
-        print(f"发送数据失败: {e}")
-        return False
-
-
-def recv_data(sk, timeout=60):
-    """
-    接收数据的协议实现
-    """
-    sk.settimeout(timeout)
-    try:
-        print("开始接收头部长度")
-        header_length_bytes = sk.recv(4)
-        if not header_length_bytes or len(header_length_bytes) < 4:
-            print("接收头部长度失败或不足 4 字节")
-            return None, None
-        header_length = int(header_length_bytes.decode('utf-8'))
-        print(f"头部长度: {header_length}")
-        header_bytes = b''
-        while len(header_bytes) < header_length:
-            chunk = sk.recv(header_length - len(header_bytes))
-            if not chunk:
-                print("接收头部数据中断")
-                return None, None
-            header_bytes += chunk
-        try:
-            header_dict = json.loads(header_bytes.decode('utf-8'))
-            print(f"接收到头部: {header_dict}")
-        except json.JSONDecodeError as e:
-            print(f"JSON 解析失败: {e}")
-            return None, None
-        data_size = header_dict.get('size', 0)
-        print(f"预期数据大小: {data_size}")
-        data_bytes = b''
-        if data_size > 0:
-            received = 0
-            while received < data_size:
-                chunk_size = min(1024, data_size - received)
-                chunk = sk.recv(chunk_size)
-                if not chunk:
-                    print(f"数据接收中断，已接收: {received}/{data_size} 字节")
-                    break
-                data_bytes += chunk
-                received += len(chunk)
-                print(f"接收数据块: {len(chunk)} 字节，总计: {received}/{data_size}")
-        return header_dict, data_bytes
-    except socket.timeout:
-        print("接收数据超时")
-        return None, None
-    except Exception as e:
-        print(f"接收数据失败: {e}")
-        return None, None
-
-
 def send_header_json(sk, header):
     header_bytes = bytes(json.dumps(header), encoding='utf-8')
     header_bytes_l = len(header_bytes)
@@ -237,19 +164,21 @@ def show_files(sk):
     """
     请求显示服务器文件列表
     """
-    header_json = {
-        "type": "msg",
-        "size": 0,
-        "action": "list_files"
+    header = {
+        "mode": "file",
+        "action": "show_file"
     }
-    if send_data(sk, header_json):
-        response_header, response_data = recv_data(sk)
-        if response_data:
-            file_list = response_data.decode('utf-8')
-            print("服务器文件列表:")
-            print(file_list)
-            return True
-    return False
+    # 发送头数据
+    send_header_json(sk, header)
+    header_200 = recv_header_json(sk)
+    if header_200.get('code', 0) != 200:
+        print("请求失败")
+        return False
+    file_list_json = header_200.get("file_list", {"r": "err"})['uploads']
+
+    for i in file_list_json:
+        print(i)
+    return True
 
 
 def recv_header_json(sk):

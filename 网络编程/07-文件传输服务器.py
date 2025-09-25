@@ -44,66 +44,6 @@ def recv_header_json(conn):
     return header_json
 
 
-def recv_data(conn):
-    """
-    接收数据的协议实现
-    协议格式: [4字节头部长度（二进制）] + [头部JSON] + [数据内容]
-    """
-    try:
-        print("开始接收头部长度")
-        header_length_bytes = sk.recv(4)
-        if not header_length_bytes or len(header_length_bytes) < 4:
-            print("接收头部长度失败或不足 4 字节")
-            return None, None
-
-        header_length = int(header_length_bytes.decode('utf-8'))
-        print(f"头部长度: {header_length}")
-
-        header_bytes = b''
-        while len(header_bytes) < header_length:
-            chunk = sk.recv(header_length - len(header_bytes))
-            if not chunk:
-                print("接收头部数据中断")
-                return None, None
-            header_bytes += chunk
-
-        try:
-            header_dict = json.loads(header_bytes.decode('utf-8'))
-            print(f"接收到头部: {header_dict}")
-        except json.JSONDecodeError as e:
-            print(f"JSON 解析失败: {e}")
-            return None, None
-
-        data_size = header_dict.get('size', 0)
-        print(f"预期数据大小: {data_size}")
-        data_bytes = b''
-        if data_size > 0:
-            print("到这步")
-            # 发送relady信息
-
-            received = 0
-            while received < data_size:
-                chunk_size = min(1024, data_size - received)
-                try:
-                    chunk = sk.recv(chunk_size)
-                    if not chunk:
-                        print(f"数据接收中断，已接收: {received}/{data_size} 字节")
-                        break
-                    data_bytes += chunk
-                    received += len(chunk)
-                    print(f"接收数据块: {len(chunk)} 字节，总计: {received}/{data_size}")
-                except socket.timeout:
-                    print(f"接收数据超时，已接收: {received}/{data_size} 字节")
-                    break
-            print("recv结束")
-        return header_dict, data_bytes
-
-    except Exception as e:
-        print(f"接收数据异常: {e}")
-        traceback.print_exc()
-        return None, None
-
-
 def send_data(conn, header_json, data=None):
     """
     发送数据的协议实现
@@ -281,8 +221,29 @@ def send_file(conn, header_json):
     return True
 
 
-def show_file():
-    pass
+def get_files_in_dir(directory):
+    """
+    获取文件夹下的所有文件并生成 JSON 对象（dict）
+    结构为 {相对路径: [文件名列表]}
+    """
+    files_dict = {}
+    for root, dirs, files in os.walk(directory):
+        rel_path = os.path.relpath(root, directory)
+        if rel_path == ".":
+            rel_path = directory
+        files_dict[rel_path] = files
+    return files_dict
+
+
+def show_file(conn, header_json):
+    header_200 = {
+        "code": 200,
+        "mode": "file",
+        "action": "show_file",
+        "file_list": get_files_in_dir(file_path)
+    }
+    send_header_json(conn, header_200)
+    print("发送成功")
 
 
 def handle_client_request(conn, addr):
@@ -302,7 +263,8 @@ def handle_client_request(conn, addr):
                 elif header_json['action'] == 'get_file':
                     send_file(conn, header_json)
                     continue
-
+                elif header_json['action'] == 'show_file':
+                    show_file(conn, header_json)
             else:
                 continue
     except socket.timeout:
