@@ -171,42 +171,66 @@ def send_file(sk, file_path):
     return True
 
 
+def receive_file_chunks(sk, file_size, chunk_size=1024):
+    """
+    服务器端接收文件数据的迭代器
+
+    参数:
+        conn: 连接对象，用于接收数据
+        file_size: 预期的文件总大小
+        chunk_size: 每次接收的数据块大小，默认1024字节
+
+    返回:
+        生成器，每次产生接收到的数据块
+    """
+    remaining = file_size
+    while remaining > 0:
+        # 计算本次应该接收的实际大小（不超过剩余大小和块大小）
+        receive_size = min(chunk_size, remaining)
+        # 接收数据
+        chunk = sk.recv(receive_size)
+
+        if not chunk:
+            # 如果没有接收到数据，但还有剩余 bytes 未接收，说明连接可能中断
+            raise ConnectionAbortedError("连接已中断，文件传输不完整")
+
+        yield chunk
+        remaining -= len(chunk)
+
+    # 如果所有数据都已接收完毕
+    if remaining == 0:
+        return True
+    else:
+        raise RuntimeError(f"文件传输不完整，预期接收{file_size}字节，实际接收{file_size - remaining}字节")
+
+
 def get_file(sk, file_name):
     """
     从服务器下载文件
     """
-    header_json = {
-        "type": "msg",
-        "size": len(file_name.encode('utf-8')),
-        "action": "download"
+    file_name_all = os.path.basename(file_name)
+    file_name = os.path.splitext(file_name_all)[0]
+    file_type = os.path.splitext(file_name_all)[1]
+    header = {
+        "mode": 'file',
+        "user": "Martin",
+        "file_name": file_name,
+        "file_type": file_type,
+        "action": "get_file"
     }
-    if send_data(sk, header_json, file_name):
-        file_header, file_data = recv_data(sk)
-        if file_header and file_header.get('type') == 'file':
-            file_size = file_header.get('size', 0)
-            file_name = file_header.get('file_name', 'download') + file_header.get('file_format', '')
-            print(f"开始下载文件: {file_name}, 大小: {file_size} 字节")
-            received_size = len(file_data)
-            with open(file_name, 'wb') as f:
-                if file_data:
-                    f.write(file_data)
-                while received_size < file_size:
-                    chunk_size = min(1024, file_size - received_size)
-                    chunk = sk.recv(chunk_size)
-                    if not chunk:
-                        print(f"文件数据接收中断，已接收: {received_size}/{file_size} 字节")
-                        break
-                    f.write(chunk)
-                    received_size += len(chunk)
-                    progress = received_size / file_size * 100
-                    print(f"\r下载进度: {received_size}/{file_size} 字节 ({progress:.1f}%)", end='')
-            print(f"\n文件下载完成: {file_name}")
-            return True
-        else:
-            if file_data:
-                error_text = file_data.decode('utf-8')
-                print(f"下载失败: {error_text}")
-    return False
+    res = send_header_json(sk, header)
+    header_json = recv_header_json(sk)
+    if header_json.get("code", 0) != 200:
+        msg = header_json.get("msg")
+        print(msg)
+        return False
+    # 接收
+    file_size = header_json.get("file_size")
+    with open(file_name_all, "wb") as f:
+        for i in receive_file_chunks(sk, file_size, chunk_size=1024):
+            f.write(i)
+    print(f"{file_name_all}文件下载成功")
+    return True
 
 
 def show_files(sk):

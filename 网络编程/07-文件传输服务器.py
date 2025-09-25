@@ -9,12 +9,21 @@ import traceback
 # 创建文件存储目录
 if not os.path.exists('uploads'):
     os.makedirs('uploads')
-
+file_path = "uploads"
 sk = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sk.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 sk.bind(('127.0.0.1', 8081))
 sk.listen(5)
 print("服务器已开启".center(50, '-'))
+
+
+def read_large_file(file_path, chunk_size=1024):
+    """
+    文件读取生成器
+    """
+    with open(file_path, 'rb') as f:
+        while chunk := f.read(chunk_size):
+            yield chunk
 
 
 def recv_header_json(conn):
@@ -235,8 +244,41 @@ def reply_msg(conn, header_json):
     return True
 
 
-def send_file():
-    pass
+def is_in_directory(path, directory):
+    # 转换为绝对路径
+    path = os.path.abspath(path)
+    directory = os.path.abspath(directory)
+
+    # 判断 directory 是否是 path 的公共路径
+    return os.path.commonpath([path, directory]) == directory
+
+
+def send_file(conn, header_json):
+    file_name = os.path.join("uploads", header_json['file_name'] + header_json['file_type'])
+    if not is_in_directory(file_name, file_name):
+        # 给的文件不存在
+        header_400 = {
+            "code": 400,
+            "mode": "file",
+            "file_name": file_name,
+            "msg": f"{file_name}文件不存在"
+        }
+        send_header_json(conn, header_400)
+        return False
+
+    header_200 = {
+        "code": 200,
+        "mode": "file",
+        "file_name": header_json['file_name'],
+        "file_type": header_json['file_type'],
+        "file_size": os.path.getsize(file_name),
+        "md5": file_to_md5(file_name),
+    }
+    send_header_json(conn, header_200)
+    for i in read_large_file(file_name):
+        conn.send(i)
+    print("发送文件成功")
+    return True
 
 
 def show_file():
@@ -256,6 +298,11 @@ def handle_client_request(conn, addr):
             elif header_json['mode'] == 'file':
                 if header_json['action'] == 'pull_file':
                     recv_file(conn, header_json)
+                    continue
+                elif header_json['action'] == 'get_file':
+                    send_file(conn, header_json)
+                    continue
+
             else:
                 continue
     except socket.timeout:
