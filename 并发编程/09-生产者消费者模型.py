@@ -47,8 +47,8 @@
 #     q.put("鹤顶红")
 #     # 因为有两个消费者所以要加两个毒
 #     q.put("鹤顶红")
-
-
+#
+#
 # 统计消费者、智能添加鹤顶红
 # from multiprocessing import Process, Queue
 # import time

@@ -13,25 +13,25 @@ multiprocessing :主要用
 subprocess：功能少点、运维用的多
 """
 # 方法一
-# from multiprocessing import Process
-# import time
-#
-#
-# def func(name):
-#     print(f"{name}任务开始")
-#     time.sleep(5)
-#     print(f"{name}任务结束")
-#
-# # windows必须加这个、要不然报错
-# if __name__ == '__main__':
-#     """
-#     windows创建子进程的方式是导入模块的模式、所以牵扯循环导入的问题。
-#     """
-#     # 1、进程操作对象
-#     p = Process(target=func, args=("子线程",))
-#     # 2、创建进程
-#     p.start()
-#     print("主进程")
+from multiprocessing import Process
+import time
+
+
+def func(name):
+    print(f"{name}任务开始")
+    time.sleep(5)
+    print(f"{name}任务结束")
+
+# windows必须加这个、要不然报错
+if __name__ == '__main__':
+    """
+    windows创建子进程的方式是导入模块的模式、所以牵扯循环导入的问题。
+    """
+    # 1、进程操作对象
+    p = Process(target=func, args=("子线程",))
+    # 2、创建进程
+    p.start()
+    print("主进程")
 
 # 方式二 类方式
 from multiprocessing import Process
