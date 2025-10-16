@@ -5,6 +5,9 @@
 @Time    : 2025/10/15 21:40
 @Desc    :
 python3: 没有继承其他类、默认继承object类
+
+继承：什么 ‘是’ 什么的关系
+’is-a‘关系
 """
 
 # 继承是创建新类的方式、 （子类、父类）
@@ -118,10 +121,8 @@ class Chinese(Human):
         # self.name = name
         # self.age = age
         # self.gender = gender
-        # Human.__init__(self, name, age, gender)
-        super().__init__()
+        Human.__init__(self, name, age, gender)
         self.balance = balance
-
 
     def speak_chinese(self):
         print(f'{self.name}在说普通话')
@@ -140,8 +141,60 @@ class American(Human):
         print(f'{self.name}speak english')
 
 
-dy_obj = Chinese('Marin', 18, "男")
+dy_obj = Chinese('Marin', 18, "男", 100)
 print(dy_obj.__dict__)
 print(dy_obj.nation)
 print(dy_obj.star)
 dy_obj.speak_chinese()
+
+
+# 多态
+# 汽车：奔驰、理想、小米、华为
+
+class car:
+    def run(self):
+        print('run')
+
+
+class xiaomi(car):
+    def run(self):
+        super().run()
+        print('充电')
+
+
+class lix(car):
+    def run(self):
+        super().run()
+        print('换电')
+
+
+car1 = xiaomi()
+
+
+def driver_car(car):
+    car.run()
+
+
+driver_car(car1)
+
+# 通过多态统一调用接口、不管是哪个类型、使用者的调用方法都是一样的
+'123'.__len__()
+[1, 2, 3].__len__()
+{1: '1', 2: '2', 3: '3'}.__len__()
+
+
+# 不同的类型有同样的方法名、就可以定义一个接口
+def my_len(obj):
+    return obj.__len__()
+
+
+# len('123')
+# len([1, 2, 3])
+# len({1: '1', 2: '2'})
+
+print(my_len('123'))
+print(my_len([1, 2, 3]))
+print(my_len({1: '1', 2: '2'}))
+
+# __iter__
+# for
